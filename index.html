@@ -1,0 +1,1135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>adb transfer</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --panel2:#1c222b; --line:#262d38;
+    --text:#e6e9ef; --dim:#8b95a7; --accent:#4c8dff; --accent2:#2fbf71;
+    --warn:#ff6b6b; --sel:#1e3a63;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  header{
+    display:flex; align-items:center; gap:12px; padding:10px 14px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  header .brand{font-weight:650; letter-spacing:.2px}
+  header .brand span{color:var(--dim); font-weight:400}
+  select,input,button{
+    font:inherit; color:var(--text); background:var(--panel2);
+    border:1px solid var(--line); border-radius:6px; padding:5px 9px;
+  }
+  button{cursor:pointer}
+  button:hover:not(:disabled){border-color:#3a465a; background:#232b36}
+  button:disabled{opacity:.4; cursor:default}
+  .primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+  .primary:hover:not(:disabled){background:#3d7bea; border-color:#3d7bea}
+  .spacer{flex:1}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+  .dot.ok{background:var(--accent2)} .dot.bad{background:var(--warn)}
+
+  main{flex:1; display:flex; min-height:0}
+  .pane{flex:1; display:flex; flex-direction:column; min-width:0; min-height:0}
+  .pane + .mid + .pane{border-left:1px solid var(--line)}
+  .paneHead{
+    padding:8px 10px; background:var(--panel); border-bottom:1px solid var(--line);
+    display:flex; flex-direction:column; gap:7px; flex:0 0 auto;
+  }
+  .titleRow{display:flex; align-items:center; gap:8px}
+  .titleRow h2{margin:0; font-size:12px; text-transform:uppercase;
+    letter-spacing:.8px; color:var(--dim); font-weight:600}
+  .pathRow{display:flex; gap:6px}
+  .pathRow input{flex:1; min-width:0; font-family:ui-monospace,monospace; font-size:12px}
+  .meta{font-size:11px; color:var(--dim)}
+  .actRow{display:flex; align-items:center; gap:5px; flex-wrap:wrap}
+  .actRow button{padding:3px 8px; font-size:11.5px}
+  .actRow .sep{width:1px; height:18px; background:var(--line); margin:0 3px}
+  .clip{font-size:11px; color:var(--accent); display:none; align-items:center; gap:5px}
+  .clip.show{display:inline-flex}
+  .clip button{padding:1px 5px; font-size:10px}
+  .danger{color:#ff9a9a; border-color:#4a2830}
+  .danger:hover:not(:disabled){background:#3a1e22; border-color:#6b3239}
+  .modal .primary.danger{background:#b3323c; border-color:#b3323c; color:#fff}
+  .modal .primary.danger:hover{background:#c93a45; border-color:#c93a45}
+  .delList{max-height:170px; overflow:auto; margin-bottom:14px;
+    border:1px solid var(--line); border-radius:6px}
+  .delList div{padding:5px 9px; font-size:12px; border-bottom:1px solid #1b212a;
+    display:flex; gap:8px; align-items:baseline}
+  .delList div:last-child{border-bottom:none}
+  .delList .n{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap}
+  .delList .s{color:var(--dim); font-size:11px; white-space:nowrap}
+
+  .list{flex:1; overflow:auto; min-height:0}
+  table{width:100%; border-collapse:collapse; table-layout:fixed}
+  th{
+    position:sticky; top:0; z-index:1; background:var(--panel);
+    text-align:left; font-size:11px; color:var(--dim); font-weight:600;
+    padding:6px 8px; border-bottom:1px solid var(--line); cursor:pointer;
+    user-select:none; white-space:nowrap;
+  }
+  td{padding:4px 8px; border-bottom:1px solid #1b212a; vertical-align:middle}
+  tbody tr{cursor:default}
+  tbody tr:hover{background:#1a202a}
+  tbody tr.sel{background:var(--sel)}
+  .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .nm.dir{color:#8fc0ff; font-weight:500; cursor:pointer}
+  .nm.dir:hover{text-decoration:underline}
+  .sz,.dt{color:var(--dim); font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  td.sz{text-align:right}
+  input[type=checkbox]{accent-color:var(--accent); cursor:pointer; margin:0}
+  .empty{padding:24px; text-align:center; color:var(--dim)}
+  .rnInput{
+    width:100%; padding:2px 6px; font:inherit; font-size:12px;
+    background:#0d1016; border:1px solid var(--accent); border-radius:4px;
+  }
+  .rnInput:focus{outline:none; box-shadow:0 0 0 2px rgba(76,141,255,.25)}
+  tr.renaming{background:var(--sel)}
+  td.mode{color:var(--dim); font-family:ui-monospace,monospace; font-size:11px;
+    text-align:right; white-space:nowrap}
+
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex;
+    align-items:center; justify-content:center; z-index:50}
+  .modal{background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:18px; width:400px; max-width:92vw; box-shadow:0 18px 50px rgba(0,0,0,.5)}
+  .modal h3{margin:0 0 4px; font-size:14px}
+  .modal .sub{color:var(--dim); font-size:12px; margin-bottom:14px;
+    word-break:break-all}
+  .permGrid{width:100%; border-collapse:collapse; margin-bottom:14px}
+  .permGrid th{position:static; background:none; border:none; text-align:center;
+    padding:4px; font-size:11px; color:var(--dim)}
+  .permGrid th:first-child{text-align:left}
+  .permGrid td{border:none; padding:5px 4px; text-align:center}
+  .permGrid td:first-child{text-align:left; color:var(--dim); font-size:12px}
+  .octRow{display:flex; align-items:center; gap:10px; margin-bottom:14px}
+  .octRow input{width:80px; font-family:ui-monospace,monospace; letter-spacing:2px;
+    text-align:center; font-size:14px}
+  .octRow .was{color:var(--dim); font-size:12px}
+  .modalBtns{display:flex; gap:8px; justify-content:flex-end}
+  .note{background:#3a2a12; border:1px solid #5c441d; color:#ffd699;
+    border-radius:6px; padding:9px 11px; font-size:12px; margin-bottom:14px;
+    line-height:1.5}
+  .err{padding:12px; margin:10px; border-radius:6px; background:#2a1a1d;
+    border:1px solid #4a2830; color:#ffb3b3; font-size:12px; white-space:pre-wrap}
+
+  .mid{
+    flex:0 0 auto; width:66px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:10px;
+    background:var(--panel); border-left:1px solid var(--line);
+  }
+  .mid button{width:50px; height:44px; font-size:11px; line-height:1.2;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px}
+  .mid .ar{font-size:16px}
+
+  footer{
+    flex:0 0 auto; background:var(--panel); border-top:1px solid var(--line);
+    display:flex; flex-direction:column; max-height:38vh;
+  }
+  .qHead{display:flex; align-items:center; gap:10px; padding:7px 12px;
+    border-bottom:1px solid var(--line)}
+  .qHead h3{margin:0; font-size:12px; text-transform:uppercase;
+    letter-spacing:.8px; color:var(--dim); font-weight:600}
+  .qList{overflow:auto; min-height:0}
+  .job{display:flex; align-items:center; gap:10px; padding:7px 12px;
+    border-bottom:1px solid #1b212a}
+  .job .arrow{font-size:14px; width:16px; text-align:center; flex:0 0 auto}
+  .job .info{flex:1; min-width:0}
+  .job .jn{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px}
+  .job .js{font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums}
+  .bar{height:4px; background:#232b36; border-radius:3px; overflow:hidden; margin-top:4px}
+  .bar i{display:block; height:100%; background:var(--accent); transition:width .3s}
+  .job.done .bar i{background:var(--accent2)}
+  .job.error .bar i{background:var(--warn)}
+  .job.canceled .bar i{background:#5a6474}
+  .badge{font-size:10px; padding:2px 6px; border-radius:4px; background:#232b36;
+    color:var(--dim); text-transform:uppercase; letter-spacing:.5px; flex:0 0 auto}
+  .job.running .badge{background:#1d3357; color:#9cc4ff}
+  .job.done .badge{background:#123021; color:#8ee0b0}
+  .job.error .badge{background:#3a1e22; color:#ffa8a8}
+  .noJobs{padding:14px 12px; color:var(--dim); font-size:12px}
+
+  .eject{border-color:#3a465a}
+  .eject:hover:not(:disabled){background:#2a3342; border-color:#4d5b71}
+  .banner{
+    flex:0 0 auto; display:none; align-items:center; gap:12px;
+    padding:10px 14px; background:#123021; border-bottom:1px solid #1e4c35;
+    color:#a8e6c4; font-size:13px;
+  }
+  .banner.show{display:flex}
+  .banner.warn{background:#3a2a12; border-bottom-color:#5c441d; color:#ffd699}
+  .banner b{font-weight:650}
+  .banner .spacer{flex:1}
+  .banner button{background:#1b3d2a; border-color:#2c5c40; color:#cdf0dc}
+  .banner.warn button{background:#4a3517; border-color:#6b4d22; color:#ffe6bf}
+  .banner ul{margin:4px 0 0; padding-left:18px; font-size:12px; opacity:.9}
+  .banner code{font-family:ui-monospace,monospace; font-size:11px;
+    word-break:break-all; opacity:.85}
+  .stack{display:flex; flex-direction:column; gap:2px; min-width:0}
+  .hint{font-size:11px; color:var(--dim); padding:0 12px 8px}
+  [hidden]{display:none!important}
+
+  /* ---------------------------------------------------------------- tabs */
+  .tabs{display:flex; gap:2px; background:var(--bg); border:1px solid var(--line);
+    border-radius:7px; padding:2px}
+  .tabs button{border:none; background:none; padding:4px 12px; color:var(--dim);
+    border-radius:5px}
+  .tabs button:hover:not(:disabled){background:#1f2630; color:var(--text)}
+  .tabs button.on{background:var(--panel2); color:var(--text); font-weight:600;
+    box-shadow:inset 0 0 0 1px var(--line)}
+  .view{flex:1; display:flex; flex-direction:column; min-height:0}
+  .filesOnly{display:contents}
+
+  /* ------------------------------------------------------------ displays */
+  #displaysView{overflow:auto}
+  .dWrap{width:100%; max-width:1080px; margin:0 auto; padding:18px 16px 40px;
+    display:flex; flex-direction:column; gap:22px}
+  .dSection h2{margin:0 0 10px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.8px; color:var(--dim); font-weight:600;
+    display:flex; align-items:center; gap:10px}
+  .dSection h2 .meta{text-transform:none; letter-spacing:0; font-weight:400}
+  .cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
+  .dCard{background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:14px; display:flex; flex-direction:column; gap:12px; transition:border-color .2s}
+  .dCard.on{border-color:#2b4a6f}
+  .dTop{display:flex; align-items:center; gap:12px}
+  .mon{flex:0 0 auto; width:46px; height:34px; border-radius:4px; border:2px solid #3a4557;
+    background:#0b0d11; position:relative; transition:all .2s}
+  .mon::after{content:""; position:absolute; left:50%; bottom:-7px; width:14px; height:4px;
+    margin-left:-7px; background:#3a4557; border-radius:0 0 2px 2px}
+  .dCard.on .mon{border-color:#5a8fd6; background:linear-gradient(135deg,#1d3c66,#274f86)}
+  .dCard.on .mon::after{background:#5a8fd6}
+  .mon.laptop::after{left:-6px; right:-6px; width:auto; margin:0; height:3px; bottom:-5px;
+    border-radius:0 0 3px 3px}
+  .dInfo{flex:1; min-width:0}
+  .dName{font-size:14px; font-weight:600; display:flex; align-items:center; gap:7px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .dInfo .meta{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .pill{font-size:10px; font-weight:600; padding:1px 6px; border-radius:4px;
+    background:#1d3357; color:#9cc4ff; text-transform:uppercase; letter-spacing:.5px}
+  .pill.warn{background:#3a2a12; color:#ffd699}
+  .switch{position:relative; flex:0 0 auto; width:52px; height:28px; cursor:pointer}
+  .switch input{position:absolute; opacity:0; inset:0; margin:0; cursor:pointer}
+  .switch i{position:absolute; inset:0; background:#2a323e; border-radius:14px;
+    transition:background .2s; pointer-events:none}
+  .switch i::after{content:""; position:absolute; left:3px; top:3px; width:22px; height:22px;
+    border-radius:50%; background:#c9d1dd; transition:transform .2s}
+  .switch input:checked + i{background:var(--accent2)}
+  .switch input:checked + i::after{transform:translateX(24px); background:#fff}
+  .switch input:focus-visible + i{box-shadow:0 0 0 2px rgba(76,141,255,.5)}
+  .switch input:disabled{cursor:default}
+  .switch input:disabled + i{opacity:.5}
+  .dState{font-size:12px; color:var(--dim)}
+  .dCard.on .dState b{color:#8ee0b0}
+  .sl{display:flex; align-items:center; gap:10px; font-size:12px; color:var(--dim)}
+  .sl span:first-child{width:74px; flex:0 0 auto}
+  .sl input{flex:1; min-width:0; accent-color:var(--accent); padding:0; border:none;
+    background:none}
+  .sl output{width:38px; text-align:right; font-variant-numeric:tabular-nums}
+  .absent{font-size:12px; color:var(--dim); margin-top:8px}
+
+  .chips{display:flex; flex-wrap:wrap; gap:8px}
+  .chip{display:inline-flex; align-items:center; gap:0; border:1px solid var(--line);
+    border-radius:7px; background:var(--panel2); overflow:hidden}
+  .chip button{border:none; border-radius:0; background:none; padding:6px 11px}
+  .chip button:hover:not(:disabled){background:#232b36}
+  .chip .x{padding:6px 8px; color:var(--dim); border-left:1px solid var(--line)}
+  .chip.saved{border-color:#2b4a6f}
+  .dashed{border-style:dashed; color:var(--dim)}
+
+  .arrange{display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:12px}
+  @media (max-width:760px){ .arrange{grid-template-columns:1fr} }
+  .arena{position:relative; height:280px; background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; overflow:hidden;
+    background-image:radial-gradient(#222a35 1px, transparent 1px); background-size:16px 16px}
+  .rect{position:absolute; border:2px solid #4d6a92; background:rgba(40,72,115,.55);
+    border-radius:5px; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; text-align:center; cursor:grab; user-select:none;
+    touch-action:none; overflow:hidden; padding:4px; font-size:12px}
+  .rect .rn{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
+  .rect .rs{font-size:10.5px; color:#b9c6d8; white-space:nowrap}
+  .rect.sel{border-color:var(--accent); background:rgba(56,110,190,.6);
+    box-shadow:0 0 0 3px rgba(76,141,255,.25); z-index:2}
+  .rect.dragging{cursor:grabbing; opacity:.85; z-index:3}
+  .rect.primary::before{content:""; position:absolute; top:0; left:0; right:0; height:4px;
+    background:#9cc4ff; opacity:.7}
+  .arenaEmpty{position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; color:var(--dim)}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    padding:14px; display:flex; flex-direction:column; gap:10px}
+  .panel h3{margin:0; font-size:13px}
+  .field{display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--dim)}
+  .field select{width:100%}
+  .check{display:flex; gap:8px; align-items:center; font-size:12px; cursor:pointer}
+  .applyRow{display:flex; gap:8px; align-items:center; margin-top:10px}
+  .countdown{font-variant-numeric:tabular-nums; font-weight:650}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">adb transfer</div>
+  <div class="tabs" role="tablist">
+    <button id="tabFiles" role="tab" class="on">Files</button>
+    <button id="tabDisplays" role="tab">Displays</button>
+  </div>
+  <span class="filesOnly">
+  <span id="devState" class="meta"></span>
+  <select id="device"></select>
+  <button id="refreshDev" title="Rescan for devices">Rescan</button>
+  <button id="btnEject" class="eject" title="Flush writes, then it is safe to unplug the cable">⏏ Safe to unplug</button>
+  <div class="spacer"></div>
+  <span class="meta" id="tip">Double-click a folder to open it · Shift-click to select a range</span>
+  </span>
+</header>
+
+<div class="view" id="filesView">
+<div class="banner" id="banner"></div>
+
+<main>
+  <!-- LOCAL -->
+  <section class="pane">
+    <div class="paneHead">
+      <div class="titleRow">
+        <h2>Computer</h2>
+        <span class="meta" id="lFree"></span>
+        <div class="spacer"></div>
+        <span class="meta" id="lCount"></span>
+      </div>
+      <div class="pathRow">
+        <button id="lUp" title="Parent folder">↑</button>
+        <button id="lHome" title="Home folder">⌂</button>
+        <input id="lPath" spellcheck="false">
+        <button id="lGo">Go</button>
+      </div>
+      <div class="actRow">
+        <button id="lRn" disabled>&#9998; Rename</button>
+        <button id="lPm" disabled>&#128274; Perms</button>
+        <button id="lMk">+ New folder</button>
+        <span class="sep"></span>
+        <button id="lCut" disabled>&#9986; Cut</button>
+        <button id="lPaste" disabled>&#128203; Paste</button>
+        <button id="lDel" class="danger" disabled>&#128465; Delete</button>
+        <span class="clip" id="lClip"></span>
+      </div>
+    </div>
+    <div class="list" id="lList"></div>
+  </section>
+
+  <div class="mid">
+    <button id="btnPush" class="primary" disabled title="Push selected files to the phone">
+      <span class="ar">→</span>Push
+    </button>
+    <button id="btnPull" disabled title="Pull selected files to the computer">
+      <span class="ar">←</span>Pull
+    </button>
+  </div>
+
+  <!-- DEVICE -->
+  <section class="pane">
+    <div class="paneHead">
+      <div class="titleRow">
+        <h2>Phone</h2>
+        <span class="meta" id="dFree"></span>
+        <div class="spacer"></div>
+        <span class="meta" id="dCount"></span>
+      </div>
+      <div class="pathRow">
+        <button id="dUp" title="Parent folder">↑</button>
+        <button id="dHome" title="/sdcard">⌂</button>
+        <input id="dPath" spellcheck="false">
+        <button id="dGo">Go</button>
+      </div>
+      <div class="actRow">
+        <button id="dRn" disabled>&#9998; Rename</button>
+        <button id="dPm" disabled>&#128274; Perms</button>
+        <button id="dMk">+ New folder</button>
+        <span class="sep"></span>
+        <button id="dCut" disabled>&#9986; Cut</button>
+        <button id="dPaste" disabled>&#128203; Paste</button>
+        <button id="dDel" class="danger" disabled>&#128465; Delete</button>
+        <span class="clip" id="dClip"></span>
+      </div>
+    </div>
+    <div class="list" id="dList"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="qHead">
+    <h3>Transfers</h3>
+    <span class="meta" id="qSummary"></span>
+    <div class="spacer"></div>
+    <button id="qClear">Clear finished</button>
+  </div>
+  <div class="qList" id="qList"><div class="noJobs">No transfers yet.</div></div>
+</footer>
+</div>
+
+<div class="view" id="displaysView" hidden>
+  <div class="banner" id="dBanner"></div>
+  <div class="dWrap">
+    <section class="dSection">
+      <h2>Screens <span class="meta" id="dSummary"></span></h2>
+      <div class="cards" id="dCards"></div>
+      <div class="absent" id="dAbsent"></div>
+    </section>
+
+    <section class="dSection">
+      <h2>Quick layouts</h2>
+      <div class="chips" id="dQuick"></div>
+    </section>
+
+    <section class="dSection">
+      <h2>Arrangement <span class="meta">Drag screens to match how they sit on your desk</span></h2>
+      <div class="arrange">
+        <div class="arena" id="dArena"></div>
+        <div class="panel" id="dPanel"></div>
+      </div>
+      <div class="applyRow">
+        <button id="dApply" class="primary" disabled>Apply</button>
+        <button id="dReset" disabled>Reset</button>
+        <span class="meta" id="dDirty"></span>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__";
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    ...opts,
+    headers: { "X-ADB-Transfer": TOKEN, "Content-Type": "application/json" },
+  });
+  return r.json();
+}
+
+function human(n) {
+  if (!n) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+const esc = s => s.replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ------------------------------------------------------- pane controller */
+class Pane {
+  constructor(side) {
+    this.side = side;              // "local" | "device"
+    this.entries = [];
+    this.path = "";
+    this.sel = new Set();
+    this.anchor = null;
+    this.sortKey = "name";
+    this.sortDir = 1;
+    const p = side === "local" ? "l" : "d";
+    this.el = {
+      list: document.getElementById(p + "List"),
+      path: document.getElementById(p + "Path"),
+      free: document.getElementById(p + "Free"),
+      count: document.getElementById(p + "Count"),
+    };
+    document.getElementById(p + "Go").onclick = () => this.go(this.el.path.value);
+    document.getElementById(p + "Up").onclick = () => this.up();
+    document.getElementById(p + "Home").onclick = () =>
+      this.go(side === "local" ? (this.home || "/") : "/sdcard");
+    document.getElementById(p + "Mk").onclick = () => this.mkdir();
+    this.el.rn = document.getElementById(p + "Rn");
+    this.el.rn.onclick = () => this.startRename();
+    this.el.pm = document.getElementById(p + "Pm");
+    this.el.pm.onclick = () => this.editPerms();
+    this.el.cut = document.getElementById(p + "Cut");
+    this.el.paste = document.getElementById(p + "Paste");
+    this.el.clip = document.getElementById(p + "Clip");
+    this.el.del = document.getElementById(p + "Del");
+    this.el.del.onclick = () => this.confirmDelete();
+    this.el.cut.onclick = () => this.cut();
+    this.el.paste.onclick = () => this.paste();
+    this.el.list.addEventListener("mousedown", () => { activePane = this; });
+    this.el.path.addEventListener("keydown", e => {
+      if (e.key === "Enter") this.go(this.el.path.value);
+    });
+  }
+
+  join(name) {
+    return this.path.replace(/\/+$/, "") + "/" + name;
+  }
+  up() {
+    const parts = this.path.replace(/\/+$/, "").split("/");
+    parts.pop();
+    this.go(parts.join("/") || "/");
+  }
+
+  async go(path) {
+    if (this.side === "device" && !currentSerial()) return;
+    this.loading = true;
+    const url = this.side === "local"
+      ? "/api/local?path=" + encodeURIComponent(path)
+      : "/api/device?path=" + encodeURIComponent(path) +
+        "&serial=" + encodeURIComponent(currentSerial());
+    const d = await api(url);
+    this.loading = false;
+    if (d.error) {
+      this.el.list.innerHTML = `<div class="err">${esc(d.error)}</div>`;
+      this.entries = []; this.sel.clear(); updateButtons();
+      return;
+    }
+    if (d.home) this.home = d.home;
+    this.emulated = !!d.emulated;
+    this.path = d.path;
+    this.el.path.value = d.path;
+    this.entries = d.entries;
+    this.sel.clear();
+    this.anchor = null;
+    this.renaming = null;
+    this.el.free.textContent = d.free ? d.free + " free" : "";
+    try { localStorage.setItem("adbfm.path." + this.side, d.path); } catch (_) {}
+    this.render();
+  }
+
+  async reload() {
+    if (!this.path) return;
+    const keep = new Set(this.sel);
+    await this.go(this.path);
+    keep.forEach(n => { if (this.entries.some(e => e.name === n)) this.sel.add(n); });
+    this.render();
+  }
+
+  sorted() {
+    const k = this.sortKey, dir = this.sortDir;
+    return [...this.entries].sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      let r;
+      if (k === "size") r = a.size - b.size;
+      else if (k === "mode") r = (a.mode || "").localeCompare(b.mode || "");
+      else if (k === "mtime") r = a.mtime.localeCompare(b.mtime);
+      else r = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+      return r * dir;
+    });
+  }
+
+  render() {
+    const rows = this.sorted();
+    this.view = rows;
+    const arrow = k => this.sortKey === k ? (this.sortDir > 0 ? " ▲" : " ▼") : "";
+    if (!rows.length) {
+      this.el.list.innerHTML = `<div class="empty">This folder is empty.</div>`;
+    } else {
+      this.el.list.innerHTML = `
+      <table>
+        <thead><tr>
+          <th style="width:28px"><input type="checkbox" id="all-${this.side}"></th>
+          <th data-k="name">Name${arrow("name")}</th>
+          <th data-k="mode" style="width:52px;text-align:right">Mode${arrow("mode")}</th>
+          <th data-k="size" style="width:88px;text-align:right">Size${arrow("size")}</th>
+          <th data-k="mtime" style="width:118px">Modified${arrow("mtime")}</th>
+        </tr></thead>
+        <tbody>${rows.map((e, i) => `
+          <tr data-i="${i}" class="${this.sel.has(e.name) ? "sel" : ""}${e.name === this.renaming ? " renaming" : ""}">
+            <td><input type="checkbox" ${this.sel.has(e.name) ? "checked" : ""}></td>
+            ${e.name === this.renaming
+              ? `<td colspan="4"><input class="rnInput" value="${esc(e.name)}"></td>`
+              : `<td class="nm ${e.isDir ? "dir" : ""}" title="${esc(e.name)}">${e.isDir ? "📁 " : ""}${esc(e.name)}</td>`}
+            ${e.name === this.renaming ? "" : `<td class="mode" title="${esc(e.perms || "")}">${esc(e.mode || "")}</td>
+            <td class="sz">${e.isDir ? "—" : human(e.size)}</td>
+            <td class="dt">${esc(e.mtime)}</td>`}
+          </tr>`).join("")}</tbody>
+      </table>`;
+      this.wire();
+    }
+    this.el.count.textContent =
+      `${rows.length} item${rows.length === 1 ? "" : "s"}` +
+      (this.sel.size ? ` · ${this.sel.size} selected` : "");
+    this.el.rn.disabled = this.sel.size !== 1 || !!this.renaming;
+    this.el.pm.disabled = this.sel.size !== 1 || !!this.renaming;
+    this.el.cut.disabled = this.sel.size === 0 || !!this.renaming;
+    this.el.del.disabled = this.sel.size === 0 || !!this.renaming;
+    this.syncClip();
+    updateButtons();
+  }
+
+  wire() {
+    const tbl = this.el.list.querySelector("table");
+    tbl.querySelectorAll("th[data-k]").forEach(th => {
+      th.onclick = () => {
+        const k = th.dataset.k;
+        this.sortDir = this.sortKey === k ? -this.sortDir : 1;
+        this.sortKey = k;
+        this.render();
+      };
+    });
+    const all = tbl.querySelector("#all-" + this.side);
+    all.checked = this.sel.size > 0 && this.sel.size === this.view.length;
+    all.onclick = () => {
+      if (all.checked) this.view.forEach(e => this.sel.add(e.name));
+      else this.sel.clear();
+      this.render();
+    };
+    const rn = tbl.querySelector(".rnInput");
+    if (rn) {
+      rn.onclick = ev => ev.stopPropagation();
+      rn.ondblclick = ev => ev.stopPropagation();
+      rn.onkeydown = ev => {
+        ev.stopPropagation();
+        if (ev.key === "Enter") { ev.preventDefault(); this.commitRename(rn.value); }
+        else if (ev.key === "Escape") { ev.preventDefault(); this.cancelRename(); }
+      };
+      rn.onblur = () => { if (this.renaming) this.commitRename(rn.value); };
+      rn.focus();
+      // preselect the basename so the extension is easy to keep
+      const dot = rn.value.lastIndexOf(".");
+      rn.setSelectionRange(0, dot > 0 ? dot : rn.value.length);
+    }
+    tbl.querySelectorAll("tbody tr").forEach(tr => {
+      const i = +tr.dataset.i, e = this.view[i];
+      if (e.name === this.renaming) return;
+      tr.onclick = ev => {
+        if (ev.shiftKey && this.anchor !== null) {
+          const [a, b] = [this.anchor, i].sort((x, y) => x - y);
+          for (let k = a; k <= b; k++) this.sel.add(this.view[k].name);
+        } else {
+          this.sel.has(e.name) ? this.sel.delete(e.name) : this.sel.add(e.name);
+          this.anchor = i;
+        }
+        this.render();
+      };
+      tr.ondblclick = () => { if (e.isDir) this.go(this.join(e.name)); };
+      const nm = tr.querySelector(".nm.dir");
+      if (nm) nm.onclick = ev => { ev.stopPropagation(); this.go(this.join(e.name)); };
+    });
+  }
+
+  selectedItems() {
+    return this.entries.filter(e => this.sel.has(e.name)).map(e => ({
+      name: e.name, path: this.join(e.name), size: e.size, isDir: e.isDir,
+    }));
+  }
+
+  startRename() {
+    if (this.sel.size !== 1) return;
+    this.renaming = [...this.sel][0];
+    activePane = this;
+    this.render();
+  }
+
+  cancelRename() {
+    this.renaming = null;
+    this.render();
+  }
+
+  async commitRename(next) {
+    const old = this.renaming;
+    if (!old) return;
+    this.renaming = null;               // guard against blur firing twice
+    if (!next || next === old) { this.render(); return; }
+    const d = await api("/api/rename", {
+      method: "POST",
+      body: JSON.stringify({
+        side: this.side, path: this.path, old, new: next,
+        serial: currentSerial(),
+      }),
+    });
+    if (d.error) {
+      alert(d.error);
+      this.renaming = old;
+      this.render();
+      return;
+    }
+    this.sel.delete(old);
+    this.sel.add(next.trim());
+    await this.reload();
+  }
+
+  editPerms() {
+    if (this.sel.size !== 1) return;
+    const name = [...this.sel][0];
+    const e = this.entries.find(x => x.name === name);
+    if (e) showPermDialog(this, e);
+  }
+
+  cut() {
+    if (!this.sel.size) return;
+    clip = { side: this.side, from: this.path, items: this.selectedItems() };
+    local.syncClip();
+    device.syncClip();
+  }
+
+  syncClip() {
+    const mine = clip && clip.side === this.side;
+    this.el.paste.disabled = !mine || clip.from === this.path || !!this.renaming;
+    this.el.clip.className = "clip" + (mine ? " show" : "");
+    if (mine) {
+      this.el.clip.innerHTML =
+        `${clip.items.length} cut <button title="Clear">&times;</button>`;
+      this.el.clip.querySelector("button").onclick = () => {
+        clip = null; local.syncClip(); device.syncClip();
+      };
+    }
+  }
+
+  async paste() {
+    if (!clip || clip.side !== this.side) return;
+    const payload = {
+      side: this.side, serial: currentSerial(),
+      dest: this.path, items: clip.items,
+    };
+    this.el.paste.disabled = true;
+    const pre = await api("/api/move", {
+      method: "POST", body: JSON.stringify({ ...payload, dryRun: true }),
+    });
+    if (!pre.sameMount && !confirm(
+        `This moves between two different storage areas on the ` +
+        `${this.side === "device" ? "phone" : "computer"}, so the data has to ` +
+        `be copied rather than just relinked. Large files will take a while.` +
+        `\n\nContinue?`)) {
+      this.syncClip();
+      return;
+    }
+    this.el.paste.textContent = "\u{1F4CB} Moving\u2026";
+    let d;
+    try {
+      d = await api("/api/move", { method: "POST", body: JSON.stringify(payload) });
+    } finally {
+      this.el.paste.textContent = "\u{1F4CB} Paste";
+    }
+    const failed = (d.results || []).filter(r => r.error);
+    const moved = (d.results || []).filter(r => r.ok).length;
+    if (failed.length) {
+      showBanner(`<div class="stack">
+        <b>${moved} moved, ${failed.length} could not be</b>
+        <ul>${failed.map(f => `<li>${esc(f.name)} — ${esc(f.error)}</li>`).join("")}</ul>
+        </div><div class="spacer"></div><button data-dismiss>Dismiss</button>`, true);
+    } else {
+      hideBanner();
+    }
+    const src = clip.from;
+    clip = null;
+    this.sel.clear();
+    await this.reload();
+    // refresh the folder the files came from, if it is the other pane
+    const other = this.side === "local" ? device : local;
+    if (other.path === src) other.reload();
+    local.syncClip(); device.syncClip();
+  }
+
+  async confirmDelete() {
+    if (!this.sel.size) return;
+    const items = this.selectedItems();
+    const pre = await api("/api/delete", {
+      method: "POST",
+      body: JSON.stringify({
+        side: this.side, serial: currentSerial(), items, dryRun: true,
+      }),
+    });
+    const rows = pre.results || [];
+    const ok = rows.filter(r => r.ok);
+    if (!ok.length) {
+      alert((rows[0] && rows[0].error) || "Nothing can be deleted.");
+      return;
+    }
+    const dirs = ok.filter(r => r.isDir).length;
+    const where = this.side === "device" ? "the phone" : "this computer";
+
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML = `
+      <div class="modal">
+        <h3>Delete ${ok.length} item${ok.length === 1 ? "" : "s"}?</h3>
+        <div class="sub">from ${esc(this.path)}</div>
+        <div class="delList">${ok.map(r => `<div>
+            <span class="n">${r.isDir ? "📁 " : ""}${esc(r.name)}</span>
+            <span class="s">${r.isDir
+              ? (r.files === undefined ? "folder" : `${r.files} file${r.files === 1 ? "" : "s"} inside`)
+              : human(r.size)}</span>
+          </div>`).join("")}</div>
+        <div class="note">This deletes ${dirs ? "folders and everything inside them" : "these files"}
+          from ${where} permanently. There is no recycle bin —
+          ${this.side === "device" ? "it will not appear in the phone's Trash" : "this does not go to your desktop Trash"},
+          so it cannot be undone.</div>
+        ${rows.filter(r => r.error).length ? `<div class="note">Skipped:
+          ${rows.filter(r => r.error).map(r => esc(r.name) + " — " + esc(r.error)).join("; ")}</div>` : ""}
+        <div class="modalBtns">
+          <button id="delCancel">Cancel</button>
+          <button id="delGo" class="primary danger">Delete</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelector("#delCancel").onclick = close;
+    ov.onclick = ev => { if (ev.target === ov) close(); };
+    ov.querySelector("#delCancel").focus();
+
+    ov.querySelector("#delGo").onclick = async () => {
+      const btn = ov.querySelector("#delGo");
+      btn.disabled = true; btn.textContent = "Deleting…";
+      const d = await api("/api/delete", {
+        method: "POST",
+        body: JSON.stringify({
+          side: this.side, serial: currentSerial(),
+          items: ok.map(r => items.find(i => i.name === r.name)),
+        }),
+      });
+      close();
+      const failed = (d.results || []).filter(r => r.error);
+      if (failed.length) {
+        showBanner(`<div class="stack"><b>Some items were not deleted</b>
+          <ul>${failed.map(f => `<li>${esc(f.name)} — ${esc(f.error)}</li>`).join("")}</ul>
+          </div><div class="spacer"></div><button data-dismiss>Dismiss</button>`, true);
+      }
+      if (clip && clip.side === this.side) { clip = null; local.syncClip(); device.syncClip(); }
+      this.sel.clear();
+      await this.reload();
+    };
+  }
+
+  async mkdir() {
+    const name = prompt("New folder name:");
+    if (!name) return;
+    const d = await api("/api/mkdir", {
+      method: "POST",
+      body: JSON.stringify({
+        side: this.side, path: this.path, name,
+        serial: currentSerial(),
+      }),
+    });
+    if (d.error) alert(d.error); else this.reload();
+  }
+}
+
+const local = new Pane("local");
+const device = new Pane("device");
+
+/* ------------------------------------------------------------- devices */
+const devSel = document.getElementById("device");
+const devState = document.getElementById("devState");
+const currentSerial = () => devSel.value || "";
+
+async function loadDevices() {
+  const d = await api("/api/devices");
+  const prev = devSel.value;
+  const usable = (d.devices || []).filter(x => x.state === "device");
+  const others = (d.devices || []).filter(x => x.state !== "device");
+  devSel.innerHTML = usable.map(x =>
+    `<option value="${esc(x.serial)}">${esc(x.label)} (${esc(x.serial)})</option>`
+  ).join("");
+  if (usable.some(x => x.serial === prev)) devSel.value = prev;
+
+  if (usable.length) {
+    devState.innerHTML = ejected
+      ? `<span class="dot bad"></span>ready to unplug`
+      : `<span class="dot ok"></span>connected`;
+  } else if (others.length) {
+    devState.innerHTML = `<span class="dot bad"></span>${esc(others[0].state)} — ` +
+      `check the "Allow USB debugging" prompt on your phone`;
+    devSel.innerHTML = `<option>—</option>`;
+  } else {
+    devState.innerHTML = `<span class="dot bad"></span>no device — plug in USB, ` +
+      `enable USB debugging`;
+    devSel.innerHTML = `<option>—</option>`;
+    if (ejected) { ejected = false; hideBanner(); }  // cable actually pulled
+  }
+  updateButtons();
+  return usable.length > 0;
+}
+
+devSel.onchange = () => { ejected = false; hideBanner(); device.go("/sdcard"); };
+document.getElementById("refreshDev").onclick = async () => {
+  if (await loadDevices() && !device.path) device.go("/sdcard");
+  else if (device.path) device.reload();
+};
+
+/* ------------------------------------------------------------ permissions */
+const BITS = [["Owner", 0], ["Group", 1], ["Others", 2]];
+
+function showPermDialog(pane, entry) {
+  const start = (entry.mode || "").padStart(3, "0").slice(-3);
+  const ov = document.createElement("div");
+  ov.className = "overlay";
+  ov.innerHTML = `
+    <div class="modal">
+      <h3>Permissions</h3>
+      <div class="sub">${esc(entry.name)}</div>
+      ${pane.side === "device" && pane.emulated ? `<div class="note">
+        This folder is the phone's <b>emulated storage</b> (a FUSE mount).
+        Android generates these permissions from the folder and the owning
+        app, so they cannot be changed here — <code>chmod</code> reports
+        success but nothing actually changes.</div>` : ""}
+      <table class="permGrid">
+        <thead><tr><th></th><th>Read</th><th>Write</th><th>Execute</th></tr></thead>
+        <tbody>${BITS.map(([label, i]) => `
+          <tr><td>${label}</td>
+            ${[4, 2, 1].map(b => `<td><input type="checkbox"
+              data-i="${i}" data-b="${b}"></td>`).join("")}
+          </tr>`).join("")}</tbody>
+      </table>
+      <div class="octRow">
+        <label>Octal</label>
+        <input id="octIn" maxlength="4" value="${esc(start)}">
+        <span class="was">currently ${esc(entry.mode || "?")}</span>
+      </div>
+      <div class="modalBtns">
+        <button id="pmCancel">Cancel</button>
+        <button id="pmApply" class="primary">Apply</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const oct = ov.querySelector("#octIn");
+  const boxes = [...ov.querySelectorAll(".permGrid input")];
+  const fromOct = () => {
+    const v = (oct.value || "").padStart(3, "0").slice(-3);
+    boxes.forEach(b => {
+      const d = parseInt(v[+b.dataset.i], 8) || 0;
+      b.checked = (d & +b.dataset.b) !== 0;
+    });
+  };
+  const toOct = () => {
+    const d = [0, 0, 0];
+    boxes.forEach(b => { if (b.checked) d[+b.dataset.i] += +b.dataset.b; });
+    oct.value = d.join("");
+  };
+  boxes.forEach(b => b.onchange = toOct);
+  oct.oninput = fromOct;
+  fromOct();
+
+  const close = () => ov.remove();
+  ov.querySelector("#pmCancel").onclick = close;
+  ov.onclick = ev => { if (ev.target === ov) close(); };
+  document.addEventListener("keydown", function esc2(ev) {
+    if (ev.key === "Escape") { close(); document.removeEventListener("keydown", esc2); }
+  });
+
+  ov.querySelector("#pmApply").onclick = async () => {
+    const btn = ov.querySelector("#pmApply");
+    btn.disabled = true; btn.textContent = "Applying…";
+    const d = await api("/api/chmod", {
+      method: "POST",
+      body: JSON.stringify({
+        side: pane.side, serial: currentSerial(),
+        path: pane.path, name: entry.name, mode: oct.value,
+      }),
+    });
+    btn.disabled = false; btn.textContent = "Apply";
+    if (d.error) { alert(d.error); return; }
+    close();
+    pane.reload();
+  };
+}
+
+let clip = null;   // {side, from, items[]} — cut/paste within one side
+let activePane = null;
+document.addEventListener("keydown", ev => {
+  if (ev.key !== "F2") return;
+  const pane = (activePane && activePane.sel.size === 1) ? activePane
+    : (local.sel.size === 1 ? local : (device.sel.size === 1 ? device : null));
+  if (pane) { ev.preventDefault(); pane.startRename(); }
+});
+
+/* ------------------------------------------------------ safe disconnect */
+const banner = document.getElementById("banner");
+const btnEject = document.getElementById("btnEject");
+let ejected = false;
+
+function showBanner(html, warn) {
+  banner.className = "banner show" + (warn ? " warn" : "");
+  banner.innerHTML = html;
+  const x = banner.querySelector("[data-dismiss]");
+  if (x) x.onclick = () => hideBanner();
+}
+function hideBanner() {
+  banner.className = "banner";
+  banner.innerHTML = "";
+}
+
+async function doEject(force) {
+  const serial = currentSerial();
+  if (!serial) return;
+  btnEject.disabled = true;
+  btnEject.textContent = "⏏ Flushing…";
+  let d;
+  try {
+    d = await api("/api/disconnect", {
+      method: "POST",
+      body: JSON.stringify({ serial, force: !!force }),
+    });
+  } finally {
+    btnEject.textContent = "⏏ Safe to unplug";
+    btnEject.disabled = false;
+  }
+
+  if (d.blocked === "active") {
+    showBanner(`<div class="stack"><b>Transfers still running</b>
+      <span>Wait for them to finish, or press Stop on each one first.</span></div>
+      <div class="spacer"></div>
+      <button data-dismiss>Dismiss</button>`, true);
+    return;
+  }
+  if (d.blocked === "external") {
+    showBanner(`<div class="stack">
+        <b>An adb transfer is running outside this app</b>
+        <span>Unplugging now would leave a half-written file on the phone:</span>
+        <ul>${d.procs.map(p => `<li><code>${esc(p.cmd.slice(0, 150))}</code></li>`).join("")}</ul>
+      </div>
+      <div class="spacer"></div>
+      <button id="ejectAnyway">Disconnect anyway</button>
+      <button data-dismiss>Cancel</button>`, true);
+    document.getElementById("ejectAnyway").onclick = () => doEject(true);
+    return;
+  }
+  if (d.error) {
+    showBanner(`<div class="stack"><b>Could not disconnect safely</b>
+      <span>${esc(d.error)}</span></div><div class="spacer"></div>
+      <button data-dismiss>Dismiss</button>`, true);
+    return;
+  }
+
+  ejected = true;
+  updateButtons();
+  const what = d.network
+    ? "Device detached."
+    : "You can unplug the cable now.";
+  showBanner(`<div class="stack">
+      <b>✓ Safe to unplug — ${esc(what)}</b>
+      <span>${d.steps.map(esc).join(" · ")}</span></div>
+    <div class="spacer"></div>
+    <button id="ejectUndo">Keep using it</button>`, false);
+  document.getElementById("ejectUndo").onclick = () => {
+    ejected = false;
+    hideBanner();
+    updateButtons();
+    local.reload();
+    device.reload();
+  };
+}
+btnEject.onclick = () => doEject(false);
+
+/* ----------------------------------------------------------- transfers */
+function updateButtons() {
+  const on = !!currentSerial() && !ejected;
+  btnEject.disabled = !currentSerial() || ejected;
+  document.getElementById("btnPush").disabled = !on || local.sel.size === 0;
+  document.getElementById("btnPull").disabled = !on || device.sel.size === 0;
+}
+
+async function transfer(direction) {
+  const from = direction === "push" ? local : device;
+  const dest = direction === "push" ? device.path : local.path;
+  const items = from.selectedItems();
+  if (!items.length || !dest) return;
+  await api("/api/transfer", {
+    method: "POST",
+    body: JSON.stringify({ direction, serial: currentSerial(), dest, items }),
+  });
+  from.sel.clear();
+  from.render();
+  pollJobs();
+}
+document.getElementById("btnPush").onclick = () => transfer("push");
+document.getElementById("btnPull").onclick = () => transfer("pull");
+
+document.getElementById("qClear").onclick = async () => {
+  await api("/api/clear", { method: "POST" });
+  pollJobs();
+};
+
+const qList = document.getElementById("qList");
+const qSummary = document.getElementById("qSummary");
+let lastActive = 0;
+
+async function pollJobs() {
+  const d = await api("/api/jobs");
+  const jobs = d.jobs || [];
+  const active = jobs.filter(j => j.status === "running" || j.status === "queued").length;
+
+  if (!jobs.length) {
+    qList.innerHTML = `<div class="noJobs">No transfers yet.</div>`;
+    qSummary.textContent = "";
+  } else {
+    qList.innerHTML = jobs.map(j => {
+      const bits = [];
+      if (j.size) bits.push(human(j.size));
+      if (j.status === "running") {
+        bits.push(j.percent + "%");
+        if (j.speed) bits.push(j.speed);
+        if (j.eta) bits.push(j.eta + " left");
+      } else if (j.status === "done") {
+        bits.push(j.speed || "");
+        if (j.elapsed) bits.push(Math.round(j.elapsed) + "s");
+      } else if (j.status === "error") {
+        bits.push(j.error);
+      }
+      const cancelable = j.status === "running" || j.status === "queued";
+      return `
+      <div class="job ${j.status}">
+        <span class="arrow">${j.direction === "push" ? "→" : "←"}</span>
+        <div class="info">
+          <div class="jn" title="${esc(j.src)} → ${esc(j.dst)}">${esc(j.name)}</div>
+          <div class="js">${esc(bits.filter(Boolean).join(" · "))}</div>
+          <div class="bar"><i style="width:${j.status === "queued" ? 0 : j.percent}%"></i></div>
+        </div>
+        <span class="badge">${j.status}</span>
+        ${cancelable ? `<button data-cancel="${j.id}">Stop</button>` : ""}
+      </div>`;
+    }).join("");
+    qList.querySelectorAll("[data-cancel]").forEach(b => {
+      b.onclick = () => api("/api/cancel", {
+        method: "POST", body: JSON.stringify({ id: +b.dataset.cancel }),
+      }).then(pollJobs);
+    });
+    qSummary.textContent = active
+      ? `${active} in progress`
+      : `${jobs.length} finished`;
+  }
+
+  // refresh the destination pane when a batch completes
+  if (lastActive > 0 && active === 0) {
+    local.reload(); device.reload();
+  }
+  lastActive = active;
+  clearTimeout(pollJobs.t);
+  pollJobs.t = setTimeout(pollJobs, active ? 600 : 3000);
+}
+
+/* --------------------------------------------------------------- tabs */
+function showTab(name) {
+  const files = name !== "displays";
+  document.getElementById("filesView").hidden = !files;
+  document.getElementById("displaysView").hidden = files;
+  document.getElementById("tabFiles").classList.toggle("on", files);
+  document.getElementById("tabDisplays").classList.toggle("on", !files);
+  document.querySelector(".filesOnly").hidden = !files;
+  try { localStorage.setItem("adbfm.tab", name); } catch (_) {}
+  if (history.replaceState) history.replaceState(null, "", files ? location.pathname + location.search : "#displays");
+  if (!files && window.Displays) Displays.show(); else if (window.Displays) Displays.hide();
+}
+document.getElementById("tabFiles").onclick = () => showTab("files");
+document.getElementById("tabDisplays").onclick = () => showTab("displays");
+
+/* --------------------------------------------------------------- boot */
+(async function boot() {
+  const params = new URLSearchParams(location.search);
+  const saved = k => { try { return localStorage.getItem("adbfm.path." + k); } catch (_) { return null; } };
+  await local.go(params.get("local") || saved("local") || "");
+  if (await loadDevices()) await device.go(saved("device") || "/sdcard");
+  pollJobs();
+  setInterval(loadDevices, 5000);
+})();
+</script>
+<script src="/displays.js"></script>
+<script>
+showTab(location.hash === "#displays" ? "displays"
+  : (() => { try { return localStorage.getItem("adbfm.tab"); } catch (_) { return null; } })() || "files");
+</script>
+</body>
+</html>
