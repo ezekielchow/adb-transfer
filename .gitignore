@@ -1,0 +1,6 @@
+# per-machine API token, created on first run
+.token
+
+# Python bytecode
+__pycache__/
+*.pyc
