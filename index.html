@@ -85,6 +85,11 @@
   .nm.dir:hover{text-decoration:underline}
   .sz,.dt{color:var(--dim); font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums}
   td.sz{text-align:right}
+  /* "already at the other side" tag next to a name */
+  .ex{font-size:10px; padding:1px 5px; border-radius:4px; margin-left:6px;
+    font-weight:500; vertical-align:1px}
+  .ex.same{background:#123021; color:#8ee0b0}
+  .ex.diff{background:#3a2a12; color:#ffd699}
   input[type=checkbox]{accent-color:var(--accent); cursor:pointer; margin:0}
   .empty{padding:24px; text-align:center; color:var(--dim)}
   .rnInput{
@@ -187,6 +192,28 @@
   .view{flex:1; display:flex; flex-direction:column; min-height:0}
   .filesOnly{display:contents}
 
+  /* -------------------------------------------------------------- movies */
+  #moviesView{overflow:auto}
+  .mWrap{width:100%; max-width:1080px; margin:0 auto; padding:18px 16px 40px;
+    display:flex; flex-direction:column; gap:12px}
+  .mBar{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  #mFolder{flex:1; min-width:180px; font-family:ui-monospace,monospace; font-size:12px}
+  .pills{display:flex; flex-wrap:wrap; gap:5px}
+  .fpill{padding:3px 9px; font-size:11.5px; border-radius:12px}
+  .fpill.on, .fpill.on:hover:not(:disabled){background:var(--accent); border-color:var(--accent); color:#fff}
+  .gSec{margin-top:8px}
+  .gSec h3{margin:0 0 6px; font-size:13px; font-weight:650}
+  .gSec.miss h3{color:#ffd699}
+  .mTable{border:1px solid var(--line); border-radius:6px}
+  .mTable th{position:static}
+  .mTable .mt{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .mTable .my,.mTable .ml{color:var(--dim); font-size:12px; white-space:nowrap;
+    font-variant-numeric:tabular-nums}
+  .mTable .mg{white-space:normal}
+  .gTag{display:inline-block; font-size:10.5px; padding:1px 6px; margin:1px 4px 1px 0;
+    border-radius:4px; background:#232b36; color:var(--dim)}
+  .gTag.on{background:#1d3357; color:#9cc4ff}
+
   /* ------------------------------------------------------------ displays */
   #displaysView{overflow:auto}
   .dWrap{width:100%; max-width:1080px; margin:0 auto; padding:18px 16px 40px;
@@ -278,6 +305,7 @@
   <div class="brand">adb transfer</div>
   <div class="tabs" role="tablist">
     <button id="tabFiles" role="tab" class="on">Files</button>
+    <button id="tabMovies" role="tab">Movies</button>
     <button id="tabDisplays" role="tab">Displays</button>
   </div>
   <span class="filesOnly">
@@ -371,6 +399,24 @@
   </div>
   <div class="qList" id="qList"><div class="noJobs">No transfers yet.</div></div>
 </footer>
+</div>
+
+<div class="view" id="moviesView" hidden>
+  <div class="mWrap">
+    <div class="mBar">
+      <select id="mSide"><option value="device">Phone</option><option value="local">This computer</option></select>
+      <input id="mFolder" spellcheck="false" title="Folder to scan, including subfolders">
+      <button id="mUpdate" class="primary" title="Scan the folder and look up every movie that has no genre yet">Update missing genres</button>
+      <span class="meta" id="mStatus"></span>
+    </div>
+    <div class="mBar">
+      <input id="mSearch" placeholder="Search titles" style="width:200px">
+      <div class="pills" id="mViews"></div>
+      <div class="pills" id="mLens"></div>
+    </div>
+    <div class="pills" id="mGenres"></div>
+    <div id="mBody"></div>
+  </div>
 </div>
 
 <div class="view" id="displaysView" hidden>
@@ -496,6 +542,9 @@ class Pane {
     this.el.free.textContent = d.free ? d.free + " free" : "";
     try { localStorage.setItem("adbfm.path." + this.side, d.path); } catch (_) {}
     this.render();
+    // the other side's "already there" tags compare against this folder
+    const other = this.side === "local" ? device : local;
+    if (other && other.path && !other.renaming) other.render();
   }
 
   async reload() {
@@ -540,7 +589,7 @@ class Pane {
             <td><input type="checkbox" ${this.sel.has(e.name) ? "checked" : ""}></td>
             ${e.name === this.renaming
               ? `<td colspan="4"><input class="rnInput" value="${esc(e.name)}"></td>`
-              : `<td class="nm ${e.isDir ? "dir" : ""}" title="${esc(e.name)}">${e.isDir ? "📁 " : ""}${esc(e.name)}</td>`}
+              : `<td class="nm ${e.isDir ? "dir" : ""}" title="${esc(e.name)}">${e.isDir ? "📁 " : ""}${esc(e.name)}${this.twinTag(e)}</td>`}
             ${e.name === this.renaming ? "" : `<td class="mode" title="${esc(e.perms || "")}">${esc(e.mode || "")}</td>
             <td class="sz">${e.isDir ? "—" : human(e.size)}</td>
             <td class="dt">${esc(e.mtime)}</td>`}
@@ -608,6 +657,31 @@ class Pane {
       const nm = tr.querySelector(".nm.dir");
       if (nm) nm.onclick = ev => { ev.stopPropagation(); this.go(this.join(e.name)); };
     });
+  }
+
+  // The same name in the folder open on the other side, which is where a
+  // push/pull of this entry would land. Compared by size only: adb push does
+  // not keep mtimes, so dates differ even for identical copies.
+  twin(e) {
+    const other = this.side === "local" ? device : local;
+    if (!other || !other.path) return null;
+    const t = other.entries.find(o => o.name === e.name);
+    if (!t) return null;
+    if (t.isDir !== e.isDir) return { kind: "diff", why: t.isDir ? "a folder there" : "a file there" };
+    if (e.isDir) return { kind: "same", why: "folder exists — contents merge" };
+    return t.size === e.size
+      ? { kind: "same", why: "same size" }
+      : { kind: "diff", why: `${human(e.size)} here, ${human(t.size)} there` };
+  }
+
+  twinTag(e) {
+    const t = this.twin(e);
+    if (!t) return "";
+    const where = this.side === "local" ? "phone" : "PC";
+    const text = t.kind === "same"
+      ? (e.isDir ? `Folder also on ${where}` : `Already on ${where}`)
+      : `On ${where}, different size`;
+    return `<span class="ex ${t.kind}" title="${esc(t.why)}">${text}</span>`;
   }
 
   selectedItems() {
@@ -1025,8 +1099,18 @@ function updateButtons() {
 async function transfer(direction) {
   const from = direction === "push" ? local : device;
   const dest = direction === "push" ? device.path : local.path;
-  const items = from.selectedItems();
+  let items = from.selectedItems();
   if (!items.length || !dest) return;
+  const clash = items.map(it => ({ it, t: from.twin(it) })).filter(x => x.t);
+  if (clash.length) {
+    const choice = await confirmOverwrite(direction, dest, items.length, clash);
+    if (!choice) return;
+    if (choice === "skip") {
+      const skip = new Set(clash.map(x => x.it.name));
+      items = items.filter(it => !skip.has(it.name));
+      if (!items.length) return;
+    }
+  }
   await api("/api/transfer", {
     method: "POST",
     body: JSON.stringify({ direction, serial: currentSerial(), dest, items }),
@@ -1035,6 +1119,38 @@ async function transfer(direction) {
   from.render();
   pollJobs();
 }
+// Resolves "overwrite", "skip" or null (cancel).
+function confirmOverwrite(direction, dest, total, clash) {
+  return new Promise(resolve => {
+    const where = direction === "push" ? "the phone" : "this computer";
+    const ov = document.createElement("div");
+    ov.className = "overlay";
+    ov.innerHTML = `
+      <div class="modal">
+        <h3>${clash.length} of ${total} already exist${clash.length === 1 ? "s" : ""} on ${where}</h3>
+        <div class="sub">in ${esc(dest)}</div>
+        <div class="delList">${clash.map(({ it, t }) => `<div>
+            <span class="n">${it.isDir ? "📁 " : ""}${esc(it.name)}</span>
+            <span class="ex ${t.kind}">${t.kind === "same" ? (it.isDir ? "folder exists" : "identical") : esc(t.why)}</span>
+          </div>`).join("")}</div>
+        <div class="note">Overwrite replaces those files${clash.some(x => x.it.isDir) ? " and merges folders into the existing ones" : ""}.
+          Skip transfers only the ${total - clash.length} that are not there yet.</div>
+        <div class="modalBtns">
+          <button data-c="">Cancel</button>
+          <button data-c="skip" ${total === clash.length ? "disabled" : ""}>Skip existing</button>
+          <button data-c="overwrite" class="primary">Overwrite</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const done = v => { ov.remove(); document.removeEventListener("keydown", onKey); resolve(v); };
+    const onKey = ev => { if (ev.key === "Escape") done(null); };
+    document.addEventListener("keydown", onKey);
+    ov.onclick = ev => { if (ev.target === ov) done(null); };
+    ov.querySelectorAll("[data-c]").forEach(b => { b.onclick = () => done(b.dataset.c || null); });
+    ov.querySelector("[data-c='']").focus();
+  });
+}
+
 document.getElementById("btnPush").onclick = () => transfer("push");
 document.getElementById("btnPull").onclick = () => transfer("pull");
 
@@ -1102,19 +1218,23 @@ async function pollJobs() {
 }
 
 /* --------------------------------------------------------------- tabs */
+const TABS = ["files", "movies", "displays"];
 function showTab(name) {
-  const files = name !== "displays";
-  document.getElementById("filesView").hidden = !files;
-  document.getElementById("displaysView").hidden = files;
-  document.getElementById("tabFiles").classList.toggle("on", files);
-  document.getElementById("tabDisplays").classList.toggle("on", !files);
-  document.querySelector(".filesOnly").hidden = !files;
+  if (!TABS.includes(name)) name = "files";
+  for (const t of TABS) {
+    const cap = t[0].toUpperCase() + t.slice(1);
+    document.getElementById(t + "View").hidden = t !== name;
+    document.getElementById("tab" + cap).classList.toggle("on", t === name);
+  }
+  document.querySelector(".filesOnly").hidden = name !== "files";
   try { localStorage.setItem("adbfm.tab", name); } catch (_) {}
-  if (history.replaceState) history.replaceState(null, "", files ? location.pathname + location.search : "#displays");
-  if (!files && window.Displays) Displays.show(); else if (window.Displays) Displays.hide();
+  if (history.replaceState) history.replaceState(null, "", name === "files" ? location.pathname + location.search : "#" + name);
+  if (window.Displays) name === "displays" ? Displays.show() : Displays.hide();
+  if (window.Movies) name === "movies" ? Movies.show() : Movies.hide();
 }
-document.getElementById("tabFiles").onclick = () => showTab("files");
-document.getElementById("tabDisplays").onclick = () => showTab("displays");
+for (const t of TABS) {
+  document.getElementById("tab" + t[0].toUpperCase() + t.slice(1)).onclick = () => showTab(t);
+}
 
 /* --------------------------------------------------------------- boot */
 (async function boot() {
@@ -1127,8 +1247,9 @@ document.getElementById("tabDisplays").onclick = () => showTab("displays");
 })();
 </script>
 <script src="/displays.js"></script>
+<script src="/movies.js"></script>
 <script>
-showTab(location.hash === "#displays" ? "displays"
+showTab(location.hash ? location.hash.slice(1)
   : (() => { try { return localStorage.getItem("adbfm.tab"); } catch (_) { return null; } })() || "files");
 </script>
 </body>

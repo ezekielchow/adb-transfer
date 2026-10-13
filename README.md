@@ -1,9 +1,11 @@
 # adb transfer
 
-A small local web UI with two tabs:
+A small local web UI with three tabs:
 
 - **Files** — `adb push` / `adb pull`. Two file panes, your computer on the
   left and the phone on the right: pick files, hit Push or Pull.
+- **Movies** — genres and running time for every movie in a folder, browsable
+  by genre and length.
 - **Displays** — switch your laptop screen and external monitors on and off,
   and arrange them, using `xrandr`.
 
@@ -11,8 +13,8 @@ A small local web UI with two tabs:
 
     ~/Projects/adb-transfer/adb-transfer
 
-It opens http://127.0.0.1:8767/ in your browser (add `#displays` to land on
-the Displays tab). Ctrl+C to stop.
+It opens http://127.0.0.1:8767/ in your browser (add `#movies` or `#displays`
+to land on that tab). Ctrl+C to stop.
 Set `ADB_TRANSFER_PORT` to use a different port.
 
 ## What it does
@@ -30,6 +32,34 @@ Set `ADB_TRANSFER_PORT` to use a different port.
 - `🗑 Delete` removes files and folders, with a confirmation showing what goes
 - **⏏ Safe to unplug** — flushes pending writes before you pull the cable
 - Remembers the last folder you were in on each side
+- Flags anything that is already on the other side: **Already on phone** (same
+  size), **On phone, different size**, or **Folder also on phone**. Pushing or
+  pulling such items asks first: Cancel, Skip existing, or Overwrite
+
+## Movies
+
+Pick **Phone** or **This computer** and a folder (default `/sdcard/Movies`),
+then press **Update missing genres**. Every video file in it (subfolders too)
+that has no genre yet is looked up on [Wikidata](https://www.wikidata.org),
+which is free and needs no account or API key. Movies that were already found
+are not looked up again, so after adding new movies the button only does the
+new ones.
+
+- The title and year come from the filename: `Nobody.2.2025.1080p.WEB-DL…mkv`
+  is searched as "Nobody 2" (2025). The year has to match (±1), so a remake
+  is not mistaken for the original.
+- **By genre** lists each genre with the movies in it. A movie with several
+  genres appears under each. **List** is a single table you can sort by
+  title, year or length. The length buttons (under 1h 45m, 1h 45m–2h 15m,
+  over 2h 15m) and the genre buttons filter both views.
+- **Not matched** lists files it could not identify. **Fix** lets you type
+  the right title and year.
+- Results are kept in `~/.config/adb-transfer/movies.json`. Lookups are about
+  one request a second (Wikidata's rate limit), so a first run over 30 movies
+  takes a couple of minutes.
+
+This is the only part of the app that uses the internet: it sends the movie
+titles to Wikidata.
 
 ## Renaming
 

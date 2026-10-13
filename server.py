@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 import displays
+import genres
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def _load_token():
@@ -753,8 +754,8 @@ class Handler(BaseHTTPRequestHandler):
                 html = f.read().replace(b"__TOKEN__", TOKEN.encode())
             return self._send(200, html, "text/html; charset=utf-8")
 
-        if p == "/displays.js":
-            with open(os.path.join(HERE, "displays.js"), "rb") as f:
+        if p in ("/displays.js", "/movies.js"):
+            with open(os.path.join(HERE, p[1:]), "rb") as f:
                 return self._send(200, f.read(),
                                   "text/javascript; charset=utf-8")
 
@@ -791,6 +792,9 @@ class Handler(BaseHTTPRequestHandler):
                 "emulated": is_emulated(path),
             })
 
+        if p == "/api/movies":
+            return self._send(200, genres.listing())
+
         if p == "/api/displays":
             return self._send(200, displays.state())
 
@@ -809,6 +813,17 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return
         body = self._body()
+
+        if p == "/api/movies/update":
+            return self._send(200, movies_update(
+                body.get("side"), body.get("serial") or "",
+                body.get("folder") or "",
+            ))
+
+        if p == "/api/movies/fix":
+            return self._send(200, genres.fix(
+                body.get("key") or "", body.get("title"), body.get("year"),
+            ))
 
         if p.startswith("/api/displays/"):
             return self._send(200, display_action(p[len("/api/displays/"):],
@@ -938,6 +953,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
 
         return self._send(404, {"error": "not found"})
+
+
+def movies_update(side, serial, folder):
+    """Scan `folder` for videos (recursively) and look up the new ones."""
+    if side == "device":
+        folder = folder or "/sdcard/Movies"
+        code, out, err = run(serial, "shell", f"find {sh_quote(folder)} -type f",
+                             timeout=60)
+        if code != 0 and not out.strip():
+            return {"error": err.strip() or f"cannot read {folder}"}
+        files = [{"path": ln.rstrip("\r")} for ln in out.splitlines()
+                 if ln.rstrip("\r").lower().endswith(genres.VIDEO_EXT)]
+    elif side == "local":
+        folder, files = genres.scan_local(folder or "~/Videos")
+        if not os.path.isdir(folder):
+            return {"error": f"not a folder: {folder}"}
+    else:
+        return {"error": "bad side"}
+    res = genres.start_update(side, folder, files)
+    res["folder"] = folder
+    return res
 
 
 def display_action(action, body):
